@@ -79,6 +79,7 @@ body.dragging .drop{border-color:var(--accent);background:var(--sunken)}
 .s-warn{--st:var(--warn);--trk:color-mix(in srgb,var(--warn) 24%,var(--surface))}
 .s-crit{--st:var(--crit);--trk:color-mix(in srgb,var(--crit) 16%,var(--surface))}
 .s-none{--st:var(--axis);--trk:var(--sunken)}
+.s-cur{--st:var(--series);--trk:var(--sunken)}
 .chip{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap}
 .chip i{font-style:normal;display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--st);color:#fff;font-size:10px;font-weight:700}
 .chip.s-warn i{color:#1b1400}
@@ -136,6 +137,7 @@ td.wk.s-good span{--cellbg:color-mix(in srgb,var(--good) 20%,transparent)}
 td.wk.s-warn span{--cellbg:color-mix(in srgb,var(--warn) 30%,transparent)}
 td.wk.s-crit span{--cellbg:color-mix(in srgb,var(--crit) 18%,transparent)}
 td.wk.s-none span{--cellbg:transparent;color:var(--muted)}
+td.wk.s-cur span{--cellbg:color-mix(in srgb,var(--series) 18%,transparent)}
 td.tot{font-weight:600}
 .heat td:first-child{min-width:220px}
 .heat tr.area td.wk{font-weight:600}
@@ -169,6 +171,7 @@ input[type=search]{font:inherit;color:var(--ink);background:var(--surface);borde
     <div class="ctrls">
       <label class="btn pri" for="fileIn" tabindex="0" id="fileBtn">Cargar Excel</label>
       <input class="vh" type="file" id="fileIn" accept=".xlsx,.xls" multiple tabindex="-1">
+      <button type="button" id="planBtn" aria-expanded="false" aria-controls="planEd">Plan mensual</button>
       <button type="button" class="quiet" id="syncBtn" title="Volver a leer la base de datos o cambiar la clave"><span id="sync">Base de datos…</span></button>
     </div>
   </header>
@@ -183,6 +186,8 @@ input[type=search]{font:inherit;color:var(--ink);background:var(--surface);borde
       <label class="btn pri" for="fileIn">Elegir archivos</label>
     </div>
   </section>
+
+  <section class="card" id="planEd" hidden style="display:flex;flex-direction:column;gap:12px"></section>
 
   <main id="dash" class="view" hidden>
     <nav class="tabs" role="tablist" aria-label="Vista">
@@ -220,7 +225,15 @@ var SN=['1S · Clasificación','2S · Orden','3S · Limpieza','4S · Estandariza
 var SS=['1S','2S','3S','4S','5S'];
 var META=80, WARN=60;            /* verde desde 80 %, amarillo desde 60 % */
 var DAY=86400000, CACHE='5s-bavaro-v1';
-var S={evals:[], preg:{}, view:'year', month:null, f:{year:'',area:'',sub:'',unit:'',chk:'',ev:'',s:''}, q:'', open:{}};
+/* Plan mensual base (lo que se ha hecho cada mes en 2026): 40 evaluaciones. Se cambia en "Plan mensual" y se guarda en la base. */
+var DEFAULT_PLAN={rows:[
+  ['Almacén','Area de Cilindrios CO2/LPG',1],['Almacén','Area de Picking',1],['Almacén','Area desechos (Centro de Acopio)',1],['Almacén','Marketplace',1],
+  ['Almacén','PNC',1],['Almacén','Reempaque',1],['Almacén','Sorting',1],['Almacén','Área de GLP / Estación GLP',1],
+  ['Oficinas','Administrativas',1],['Oficinas','Enfermería',1],['Oficinas','Oficina Flota',1],['Oficinas','Oficina Reparto',1],['Oficinas','Oficina Seguridad',1],
+  ['Oficinas','Salas de agencia (Ventas, distribución, almacén, etc)',2],['Oficinas','Team ROOM Gestion',1],['Oficinas','Team Room Almacen',1],['Oficinas','Team Room Reparto',1],
+  ['Vehículos/Maquinaria','Camión',22]]};
+function clonePlan(p){ return {rows:(p&&Array.isArray(p.rows)?p.rows:DEFAULT_PLAN.rows).map(function(r){ return [r[0],r[1],+r[2]||0]; })}; }
+var S={evals:[], preg:{}, plan:clonePlan(DEFAULT_PLAN), view:'year', month:null, f:{year:'',area:'',sub:'',unit:'',chk:'',ev:'',s:''}, q:'', open:{}};
 
 function $(id){ return document.getElementById(id); }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -231,7 +244,7 @@ function parts(n){ var t=new Date(n*DAY); return {y:t.getUTCFullYear(),m:t.getUT
 function fdate(e){ return (e.d<10?'0':'')+e.d+' '+MES3[e.m-1]+' '+e.y; }
 function pc(p){ return p==null?'—':Math.round(p)+' %'; }
 function st(p){ return p==null?'none':p>=META?'good':p>=WARN?'warn':'crit'; }
-var STX={good:['✓','Cumple (≥ '+META+' %)'],warn:['!','En riesgo ('+WARN+'–'+(META-1)+' %)'],crit:['✕','Bajo (< '+WARN+' %)'],none:['–','Sin evaluar']};
+var STX={good:['✓','Cumple (≥ '+META+' %)'],warn:['!','En riesgo ('+WARN+'–'+(META-1)+' %)'],crit:['✕','Bajo (< '+WARN+' %)'],none:['–','Sin evaluar'],cur:['…','Mes en curso']};
 function chip(s,txt){ return '<span class="chip s-'+s+'"><i aria-hidden="true">'+STX[s][0]+'</i>'+(txt||STX[s][1])+'</span>'; }
 function mean(a){ a=a.filter(function(x){ return x!=null; }); return a.length?a.reduce(function(s,x){ return s+x; },0)/a.length:null; }
 function uniq(a){ var o={}; a.forEach(function(x){ if(x) o[x]=1; }); return Object.keys(o).sort(function(a,b){ return a.localeCompare(b,'es'); }); }
@@ -375,16 +388,16 @@ function pull(){
       if(confirm('La base de datos 5S está vacía. ¿Subir las evaluaciones que tienes en este navegador?')) pushEvals(S.evals,S.preg).then(function(){ setSync('ok','Base de datos: guardado'); }).catch(function(){});
       return;
     }
-    S.evals=d.evals.map(derive).sort(byDate); S.preg=d.preg||{};
+    S.evals=d.evals.map(derive).sort(byDate); S.preg=d.preg||{}; if(d.plan) S.plan=clonePlan(d.plan);
     setSync('ok','Base de datos: conectada'); saveLocal(); render();
   }).catch(function(){ DB.on=false; setSync('off','Sin conexión con la base (datos guardados en este navegador)'); });
 }
-function saveLocal(){ try{ localStorage.setItem(CACHE, JSON.stringify({evals:S.evals.map(function(e){ return [e.k,e.y,e.m,e.d,e.hm,e.dn,e.agency,e.area,e.sub,e.ev,e.pos,e.chk,e.placa,e.items]; }), preg:S.preg, view:S.view, month:S.month, f:S.f})); }catch(_){} }
+function saveLocal(){ try{ localStorage.setItem(CACHE, JSON.stringify({evals:S.evals.map(function(e){ return [e.k,e.y,e.m,e.d,e.hm,e.dn,e.agency,e.area,e.sub,e.ev,e.pos,e.chk,e.placa,e.items]; }), preg:S.preg, plan:S.plan, view:S.view, month:S.month, f:S.f})); }catch(_){} }
 function loadLocal(){
   try{
     var o=JSON.parse(localStorage.getItem(CACHE)||'null'); if(!o) return;
     S.evals=(o.evals||[]).map(function(a){ return derive({k:a[0],y:a[1],m:a[2],d:a[3],hm:a[4],dn:a[5],agency:a[6],area:a[7],sub:a[8],ev:a[9],pos:a[10],chk:a[11],placa:a[12],items:a[13]||[]}); }).sort(byDate);
-    S.preg=o.preg||{}; if(o.view) S.view=o.view; S.month=o.month||null; if(o.f) Object.assign(S.f,o.f);
+    S.preg=o.preg||{}; if(o.plan) S.plan=clonePlan(o.plan); if(o.view) S.view=o.view; S.month=o.month||null; if(o.f) Object.assign(S.f,o.f);
   }catch(_){}
 }
 
@@ -423,17 +436,35 @@ function meter(p){ var s=st(p); return '<div class="meter s-'+s+'"><i style="wid
 function cell(p,n,tip){ var s=st(p); return '<td class="wk s-'+s+'"'+(tip?' data-tip="'+esc(tip)+'"':'')+'><span>'+(p==null?'—':Math.round(p))+(n!=null&&p!=null?'<small>'+n+' ev.</small>':'')+'</span></td>'; }
 function legend(){ return '<div class="legend">'+['good','warn','crit','none'].map(function(s){ return chip(s); }).join('')+'</div>'; }
 function deltaTxt(a,b,lbl){ if(a==null||b==null) return ''; var d=Math.round(a)-Math.round(b); return '<span class="delta '+(d>0?'up':d<0?'down':'')+'">'+(d>0?'▲ +':d<0?'▼ ':'= ')+d+' pts</span> <span class="sub" style="font-size:12px">vs '+lbl+'</span>'; }
+/* ---------- Plan mensual ----------
+   Cumplimiento = evaluaciones hechas (hasta lo planificado en cada subárea) ÷ evaluaciones planificadas.
+   Hacer de más en una subárea no tapa la que faltó. Solo aplican los filtros de área y subárea. */
+function stPlan(p){ return p==null?'none':p>=99.95?'good':p>=80?'warn':'crit'; }
+function planRows(){ var f=S.f; return S.plan.rows.filter(function(r){ return r[2]>0&&(!f.area||r[0]===f.area)&&(!f.sub||r[1]===f.sub); }); }
+/* Último mes que se mide: en el año en curso, el mes actual (en curso); en años pasados, diciembre. */
+function lastPlanMonth(y){ var t=new Date(); return y<t.getFullYear()?12:y===t.getFullYear()?t.getMonth()+1:0; }
+function isCurrent(y,m){ var t=new Date(); return y===t.getFullYear()&&m===t.getMonth()+1; }
+function planMonth(y,m){
+  var done={}; S.evals.forEach(function(e){ if(e.y===y&&e.m===m){ var k=e.area+'|'+e.sub; done[k]=(done[k]||0)+1; } });
+  var rows=planRows().map(function(r){ var d=done[r[0]+'|'+r[1]]||0; return {area:r[0], sub:r[1], plan:r[2], done:d, ok:Math.min(d,r[2])}; });
+  var plan=rows.reduce(function(s,r){ return s+r.plan; },0), ok=rows.reduce(function(s,r){ return s+r.ok; },0), all=rows.reduce(function(s,r){ return s+r.done; },0);
+  return {rows:rows, plan:plan, ok:ok, extra:all-ok, p:plan?ok/plan*100:null};
+}
+function planCell(r,tip,cur){ var p=r.plan?r.ok/r.plan*100:null, s=cur&&r.ok<r.plan?'cur':stPlan(p); return '<td class="wk s-'+s+'"'+(tip?' data-tip="'+esc(tip)+'"':'')+'><span>'+r.done+'/'+r.plan+'</span></td>'; }
+function planLegend(){ return '<div class="legend">'+chip('good','Completo')+chip('warn','80–99 %')+chip('crit','Menos de 80 %')+chip('cur')+'</div>'; }
+
 /* Gráfica de columnas: cols = [{lab, sub, p, n, key, tip}] */
-function colChart(title, cols, selKey, attr){
-  var g=''; [0,25,50,75,100].forEach(function(v){ g+='<div class="grid" style="bottom:'+v+'%"><span>'+v+'</span></div>'; });
-  g+='<div class="grid meta" style="bottom:'+META+'%" title="Meta '+META+' %"><span>'+META+'</span></div>';
+function colChart(title, cols, selKey, attr, meta, stf){
+  meta=meta||META; stf=stf||st;
+  var g=''; [0,25,50,75,100].forEach(function(v){ if(v!==meta) g+='<div class="grid" style="bottom:'+v+'%"><span>'+v+'</span></div>'; });
+  g+='<div class="grid meta" style="bottom:'+meta+'%" title="Meta '+meta+' %"><span>'+meta+'</span></div>';
   var c=cols.map(function(x){
     var h=x.p==null?0:Math.max(0,Math.min(100,x.p));
-    return '<button type="button" class="col s-'+st(x.p)+(x.key===selKey?' sel':'')+'"'+(attr&&x.key!=null?' data-'+attr+'="'+x.key+'"':'')+' data-tip="'+esc(x.tip||'')+'" aria-label="'+esc(x.lab+': '+pc(x.p))+'"'+(x.p==null?' disabled':'')+'>'
+    return '<button type="button" class="col s-'+(x.s||stf(x.p))+(x.key===selKey?' sel':'')+'"'+(attr&&x.key!=null?' data-'+attr+'="'+x.key+'"':'')+' data-tip="'+esc(x.tip||'')+'" aria-label="'+esc(x.lab+': '+pc(x.p))+'"'+(x.p==null?' disabled':'')+'>'
       +(x.p==null?'':'<em style="bottom:'+h+'%">'+Math.round(x.p)+'</em>')+'<b style="height:'+h+'%"></b></button>';
   }).join('');
   var xl=cols.map(function(x){ return '<div><strong>'+esc(x.lab)+'</strong><small>'+esc(x.sub||'')+'</small></div>'; }).join('');
-  return '<div class="sechead"><h2>'+title+'</h2><span class="sub" style="font-size:12px">Línea punteada: meta '+META+' %</span></div><div class="plot">'+g+'<div class="cols">'+c+'</div></div><div class="xlab">'+xl+'</div>';
+  return '<div class="sechead"><h2>'+title+'</h2><span class="sub" style="font-size:12px">Línea punteada: meta '+meta+' %</span></div><div class="plot">'+g+'<div class="cols">'+c+'</div></div><div class="xlab">'+xl+'</div>';
 }
 function hbars(rows){
   if(!rows.length) return '<p class="empty">Sin evaluaciones con este filtro.</p>';
@@ -492,6 +523,7 @@ function renderYear(){
     +'<span>Última evaluación: '+fdate(last)+'</span>'+(note?'<span>'+esc(note)+'</span>':'')+'</div></div>'
     +'<div class="card chart">'+colChart('Resultado por mes',cols,S.month,'month')+'</div></section>';
   h+=sCards(list);
+  h+=planYear(y);
 
   /* Mapa de calor Área > Subárea × mes */
   var tree=unitTree(list,!S.byUnit), head='<tr><th>Área / subárea</th>'+MES3.map(function(m){ return '<th class="c">'+m+'</th>'; }).join('')+'<th class="c">Año</th></tr>';
@@ -518,31 +550,114 @@ function renderYear(){
   var bu=$('byUnit'); if(bu) bu.onchange=function(){ S.byUnit=bu.checked; renderYear(); };
 }
 
+function planYear(y){
+  var last=lastPlanMonth(y), rows=planRows();
+  if(!rows.length||!last) return '';
+  var pm=MESES.map(function(_,i){ return i<last?planMonth(y,i+1):null; });
+  var closed=pm.filter(function(x,i){ return x&&!isCurrent(y,i+1); });
+  var cp=closed.reduce(function(s,x){ return s+x.plan; },0), co=closed.reduce(function(s,x){ return s+x.ok; },0), cpct=cp?co/cp*100:null;
+  var full=closed.filter(function(x){ return x.p>=99.95; }).length;
+  var cols=pm.map(function(x,i){ var cur=isCurrent(y,i+1);
+    return {lab:MES3[i], sub:x?x.ok+'/'+x.plan+(cur?' · en curso':''):'', p:x?x.p:null, key:y*100+i+1, s:cur?'cur':'',
+      tip:MESES[i]+' '+y+(cur?' (mes en curso)':'')+'\n'+(x?x.ok+' de '+x.plan+' evaluaciones del plan ('+pc(x.p)+')'+(x.extra?'\n'+x.extra+' evaluaciones fuera de plan o de más':'')+'\nClic para ver el mes':'Aún no empieza')}; });
+  var ix=cols.length-1; while(ix>=0&&cols[ix].p==null) ix--;
+  var h='<div class="sechead" style="margin-top:6px"><div><h2>Cumplimiento del plan mensual</h2><p class="sub">Plan: '+rows.reduce(function(s,r){ return s+r[2]; },0)+' evaluaciones al mes en '+rows.length+' subáreas'+(S.f.area||S.f.sub?' (con el filtro de área / subárea)':'')+'. <button type="button" class="quiet" data-planedit style="padding:0">Ver o cambiar el plan</button></p></div>'+planLegend()+'</div>';
+  h+='<section class="duo"><div class="card hero s-'+stPlan(cpct)+'"><span class="lbl">Cumplimiento '+y+' · meses cerrados</span><span class="big">'+pc(cpct)+'</span>'+meter(cpct)
+    +'<div class="facts"><span><b class="num">'+co+'</b> de <b class="num">'+cp+'</b> evaluaciones planificadas</span><span><b>'+full+'</b> de '+closed.length+' meses con el plan completo</span>'
+    +(isCurrent(y,last)&&pm[last-1]?'<span>'+MESES[last-1].replace(/^./,function(c){ return c.toUpperCase(); })+' (en curso): '+pm[last-1].ok+' de '+pm[last-1].plan+'</span>':'')+'</div></div>'
+    +'<div class="card chart">'+colChart('Cumplimiento por mes',cols,S.month,'month',100,stPlan)+'</div></section>';
+  /* Plan vs realizado por subárea */
+  var ga=groupBy(rows,function(r){ return r[0]; });
+  var head='<thead><tr><th>Área / subárea</th><th class="c">Plan<small>al mes</small></th>'+MES3.map(function(m,i){ return '<th class="c">'+m+(isCurrent(y,i+1)?'<small>en curso</small>':'')+'</th>'; }).join('')+'<th class="c">Cerrados</th></tr></thead>';
+  var body=Object.keys(ga).map(function(a){
+    var arow=function(i){ var x=pm[i]; if(!x) return null; var rr=x.rows.filter(function(r){ return r.area===a; }); return {plan:rr.reduce(function(s,r){ return s+r.plan; },0), ok:rr.reduce(function(s,r){ return s+r.ok; },0), done:rr.reduce(function(s,r){ return s+r.ok; },0)}; };
+    var tot=function(get){ var p=0,o=0; pm.forEach(function(x,i){ if(x&&!isCurrent(y,i+1)){ var r=get(i); p+=r.plan; o+=r.ok; } }); return {plan:p, ok:o, done:o}; };
+    var out='<tr class="area"><td>'+esc(a)+'</td><td class="c">'+ga[a].reduce(function(s,r){ return s+r[2]; },0)+'</td>'+MESES.map(function(_,i){ var r=arow(i); return r?planCell(r,a+' · '+MESES[i]+'\n'+r.ok+' de '+r.plan,isCurrent(y,i+1)):'<td class="wk s-none"><span>—</span></td>'; }).join('')+planCell(tot(arow))+'</tr>';
+    return out+ga[a].map(function(pr){
+      var get=function(i){ return pm[i].rows.filter(function(r){ return r.area===a&&r.sub===pr[1]; })[0]; };
+      return '<tr><td>'+esc(pr[1])+'</td><td class="c">'+pr[2]+'</td>'+MESES.map(function(_,i){ if(!pm[i]) return '<td class="wk s-none"><span>—</span></td>'; var r=get(i);
+        return planCell(r,pr[1]+' · '+MESES[i]+'\nRealizadas: '+r.done+' · Plan: '+r.plan+(r.done<r.plan?'\nFaltan '+(r.plan-r.done):''),isCurrent(y,i+1)); }).join('')+planCell(tot(get))+'</tr>';
+    }).join('');
+  }).join('');
+  h+='<section class="card"><div class="sechead"><div><h2>Plan vs realizado por subárea</h2><p class="sub">Realizadas / planificadas en cada mes. "Cerrados" suma los meses ya terminados.</p></div></div><div class="scroll" style="margin-top:10px"><table class="heat">'+head+'<tbody>'+body+'</tbody></table></div></section>';
+  return h;
+}
+
+function planMonthCard(y,m){
+  if(!planRows().length) return '';
+  var x=planMonth(y,m), cur=isCurrent(y,m), falta=x.rows.filter(function(r){ return r.done<r.plan; }), listo=x.rows.filter(function(r){ return r.done>=r.plan; });
+  var rows=falta.concat(listo).map(function(r){ var s=r.done>=r.plan?'good':cur?'cur':r.done>0?'warn':'crit';
+    return '<tr><td>'+esc(r.area)+'</td><td>'+esc(r.sub)+'</td><td class="r">'+r.plan+'</td><td class="r">'+r.done+'</td><td>'+chip(s,r.done>=r.plan?'Completo':(cur?'Pendiente: ':'Faltó ')+(r.plan-r.done))+'</td></tr>'; }).join('');
+  var hs=cur&&x.ok<x.plan?'cur':stPlan(x.p);
+  return '<section class="duo"><div class="card hero s-'+hs+'"><span class="lbl">Cumplimiento del plan'+(cur?' · mes en curso':'')+'</span><span class="big">'+pc(x.p)+'</span>'
+    +'<div class="meter s-'+hs+'"><i style="width:'+(x.p==null?0:Math.min(100,x.p))+'%"></i></div>'
+    +'<div class="facts"><span><b class="num">'+x.ok+'</b> de <b class="num">'+x.plan+'</b> evaluaciones planificadas</span>'
+    +'<span><b class="num">'+listo.length+'</b> de '+x.rows.length+' subáreas completas'+(falta.length?' · faltan <b class="num">'+(x.plan-x.ok)+'</b> evaluaciones':'')+'</span>'
+    +(x.extra?'<span>'+x.extra+' evaluaciones fuera del plan o de más</span>':'')
+    +'<span><button type="button" class="quiet" data-planedit style="padding:0">Ver o cambiar el plan</button></span></div></div>'
+    +'<div class="card"><div class="sechead"><h2>Plan vs realizado en '+MESES[m-1]+'</h2>'+(falta.length?'<span class="sub">Primero lo que falta</span>':'')+'</div><div class="scroll" style="max-height:340px;overflow-y:auto;margin-top:6px"><table><thead><tr><th>Área</th><th>Subárea</th><th class="r">Plan</th><th class="r">Hechas</th><th>Estado</th></tr></thead><tbody>'+rows+'</tbody></table></div></div></section>';
+}
+
+/* ---------- Editor del plan ---------- */
+var PD=null;   /* borrador mientras el editor está abierto */
+function openPlan(show){
+  var ed=$('planEd'); if(show===undefined) show=ed.hidden;
+  ed.hidden=!show; $('planBtn').setAttribute('aria-expanded',String(show));
+  if(show){ PD=clonePlan(S.plan); renderPlanEd(); ed.scrollIntoView({behavior:'smooth',block:'start'}); } else PD=null;
+}
+function renderPlanEd(){
+  var tot=PD.rows.reduce(function(s,r){ return s+(+r[2]||0); },0);
+  var known=uniq(S.evals.map(function(e){ return e.area+'|'+e.sub; })).filter(function(k){ return !PD.rows.some(function(r){ return r[0]+'|'+r[1]===k; }); });
+  var rows=PD.rows.map(function(r,i){ return '<tr><td>'+esc(r[0])+'</td><td>'+esc(r[1])+'</td><td class="r"><label class="vh" for="pn'+i+'">Evaluaciones al mes</label><input type="number" min="0" step="1" id="pn'+i+'" data-pi="'+i+'" value="'+r[2]+'" style="width:72px;text-align:right;font:inherit;padding:4px 6px;border:1px solid var(--axis);border-radius:4px;background:var(--surface);color:var(--ink)"></td><td><button type="button" class="quiet" data-prm="'+i+'">Quitar</button></td></tr>'; }).join('');
+  $('planEd').innerHTML='<div class="sechead"><div><h2>Plan mensual de evaluaciones 5S</h2><p class="sub">Cuántas evaluaciones se deben hacer cada mes en cada subárea. Total: <b class="num" id="pTot">'+tot+'</b> al mes. Aplica a todos los meses.</p></div>'
+    +'<div class="ctrls"><button type="button" class="btn pri" id="pSave">Guardar plan</button><button type="button" id="pReset">Plan base (40 al mes)</button><button type="button" class="quiet" id="pClose">Cerrar</button></div></div>'
+    +'<div class="scroll" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>Área</th><th>Subárea</th><th class="r">Al mes</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    +(known.length?'<div class="ctrls"><label for="pAdd" class="sub">Agregar subárea del reporte:</label><select id="pAdd"><option value="">Elegir…</option>'+known.map(function(k){ var p=k.split('|'); return '<option value="'+esc(k)+'">'+esc(p[0]+' · '+p[1])+'</option>'; }).join('')+'</select></div>':'')
+    +'<p class="sub" id="pMsg" style="font-size:12.5px">Para guardar se usa la clave de edición del tablero OWD.</p>';
+}
+function sortPlan(p){ p.rows.sort(function(a,b){ return a[0].localeCompare(b[0],'es')||a[1].localeCompare(b[1],'es'); }); }
+document.addEventListener('input',function(ev){ var t=ev.target; if(PD&&t.dataset&&t.dataset.pi!=null){ PD.rows[+t.dataset.pi][2]=Math.max(0,Math.round(+t.value||0)); $('pTot').textContent=PD.rows.reduce(function(s,r){ return s+r[2]; },0); } });
+document.addEventListener('change',function(ev){ if(PD&&ev.target.id==='pAdd'&&ev.target.value){ var p=ev.target.value.split('|'); PD.rows.push([p[0],p[1],1]); sortPlan(PD); renderPlanEd(); } });
+document.addEventListener('click',function(ev){
+  var t=ev.target;
+  if(t.closest('[data-planedit]')){ openPlan(true); return; }
+  if(!PD) return;
+  if(t.dataset.prm!=null){ PD.rows.splice(+t.dataset.prm,1); renderPlanEd(); }
+  else if(t.id==='pReset'){ PD=clonePlan(DEFAULT_PLAN); renderPlanEd(); }
+  else if(t.id==='pClose'){ openPlan(false); }
+  else if(t.id==='pSave'){
+    var plan=clonePlan(PD); plan.rows=plan.rows.filter(function(r){ return r[2]>0; });
+    $('pMsg').textContent='Guardando…';
+    write('PUT','/api/config/s5_plan',plan).then(function(){ S.plan=plan; saveLocal(); setSync('ok','Base de datos: plan guardado'); openPlan(false); render(); showInfo('Plan mensual guardado: '+plan.rows.reduce(function(s,r){ return s+r[2]; },0)+' evaluaciones al mes.'); })
+      .catch(function(e){ var m=$('pMsg'); if(m) m.textContent='No se guardó el plan: '+(e.status===401?'falta la clave de edición o no es correcta.':'no hubo conexión con la base.'); });
+  }
+});
+
 /* ---------- Vista: mes ---------- */
 function renderMonth(){
   var all=base(), y=+S.f.year, byM=groupBy(all,function(e){ return e.m; });
   var months=Object.keys(byM).map(Number).sort(function(a,b){ return a-b; });
   if(!months.length){ $('vMonth').innerHTML='<div class="card"><p class="empty">No hay evaluaciones en '+y+' con este filtro.</p></div>'; return; }
+  var lastP=lastPlanMonth(y), canSee=function(x){ return !!byM[x]||(x<=lastP&&planRows().length>0); };
   var m=S.month&&Math.floor(S.month/100)===y?S.month%100:months[months.length-1];
-  if(!byM[m]) m=months[months.length-1];
+  if(!canSee(m)) m=months[months.length-1];
   S.month=y*100+m;
   var list=byM[m]||[], pm=months.filter(function(x){ return x<m; }).pop(), prev=pm?byM[pm]:null, prevLbl=pm?MESES[pm-1]:'';
-  var seg='<div class="seg" role="group" aria-label="Mes">'+MESES.map(function(n,i){ return '<button type="button" data-month="'+(y*100+i+1)+'" aria-pressed="'+(i+1===m)+'"'+(byM[i+1]?'':' disabled')+'>'+MES3[i]+'</button>'; }).join('')+'</div>';
+  var seg='<div class="seg" role="group" aria-label="Mes">'+MESES.map(function(n,i){ return '<button type="button" data-month="'+(y*100+i+1)+'" aria-pressed="'+(i+1===m)+'"'+(canSee(i+1)?'':' disabled')+'>'+MES3[i]+'</button>'; }).join('')+'</div>';
   var p=avg(list), note=filterNote();
   /* Resultado del mes por área */
   var byA=groupBy(list,function(e){ return e.area; }), prevA=prev?groupBy(prev,function(e){ return e.area; }):{};
   var areas=Object.keys(byA).map(function(a){ var pa=avg(byA[a]), pv=prevA[a]?avg(prevA[a]):null;
     return {lab:a, p:pa, n:byA[a].length, sub:pv==null?'':'Mes anterior: '+pc(pv), tip:a+'\n'+SS.map(function(s,i){ return s+': '+pc(avgS(byA[a],i)); }).join('\n')}; })
     .sort(function(a,b){ return a.p-b.p; });
-  /* Cobertura: subáreas evaluadas en el año que faltan este mes */
   var unitsYear=uniq(all.map(function(e){ return e.unit; })), unitsMonth=uniq(list.map(function(e){ return e.unit; }));
-  var missing=unitsYear.filter(function(u){ return unitsMonth.indexOf(u)<0; });
   var h='<div class="sechead"><h2>'+MESES[m-1].replace(/^./,function(c){ return c.toUpperCase(); })+' '+y+'</h2>'+seg+'</div>';
   h+='<section class="duo"><div class="card hero s-'+st(p)+'"><span class="lbl">Estatus 5S del mes</span><span class="big">'+pc(p)+'</span>'+meter(p)+'<div>'+chip(st(p))+'</div>'
     +(prev?'<div>'+deltaTxt(p,avg(prev),prevLbl)+'</div>':'')
     +'<div class="facts"><span><b class="num">'+list.length+'</b> evaluaciones · <b class="num">'+unitsMonth.length+'</b> de '+unitsYear.length+' subáreas / unidades del año</span>'
     +'<span>Evaluadores: '+esc(uniq(list.map(function(e){ return e.ev; })).join(', '))+'</span>'+(note?'<span>'+esc(note)+'</span>':'')+'</div></div>'
     +'<div class="card"><h2>Resultado del mes por área</h2><p class="sub">De menor a mayor; la marca es la meta de '+META+' %</p>'+hbars(areas)+'</div></section>';
+  h+=planMonthCard(y,m);
   h+=sCards(list,prev,prevLbl);
 
   /* Tabla por subárea con cada S */
@@ -556,9 +671,7 @@ function renderMonth(){
   }).join('');
   h+='<section class="card"><div class="sechead"><h2>Resultado por subárea</h2>'+legend()+'</div><div class="scroll" style="margin-top:10px"><table class="heat">'+head+'<tbody>'+body+'</tbody></table></div></section>';
 
-  h+='<section class="two"><div class="card"><h2>Pendientes de evaluar en '+MESES[m-1]+'</h2><p class="sub">Subáreas o unidades con evaluación en '+y+' que no tienen una este mes.</p>'
-    +(missing.length?'<div class="pend">'+missing.map(function(u){ return '<span class="tag">'+esc(u)+'</span>'; }).join('')+'</div>':'<p class="empty">Todas las subáreas del año tienen evaluación este mes.</p>')+'</div>'
-    +'<div class="card"><h2>Preguntas a reforzar en el mes</h2><p class="sub">Dónde se perdieron puntos</p>'+qTable(worstQuestions(list,10),true)+'</div></section>';
+  h+='<section class="card"><h2>Preguntas a reforzar en el mes</h2><p class="sub">Dónde se perdieron puntos</p>'+qTable(worstQuestions(list,10),true)+'</section>';
   $('vMonth').innerHTML=h;
 }
 
@@ -621,6 +734,7 @@ document.addEventListener('click',function(ev){
   var tr=ev.target.closest('tr.p[data-k]'); if(tr){ var k=tr.dataset.k; if(S.open[k]) delete S.open[k]; else S.open[k]=1; renderDetail(); }
 });
 document.addEventListener('keydown',function(ev){ var tr=ev.target.closest&&ev.target.closest('tr.p[data-k]'); if(tr&&(ev.key==='Enter'||ev.key===' ')){ ev.preventDefault(); tr.click(); } });
+$('planBtn').addEventListener('click',function(){ openPlan(); });
 $('fileIn').addEventListener('change',function(){ handleFiles(this.files); this.value=''; });
 $('fileBtn').addEventListener('keydown',function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); $('fileIn').click(); } });
 $('syncBtn').addEventListener('click',function(){
