@@ -228,7 +228,6 @@ function clean(v){ return String(v==null?'':v).replace(/^["“”\s]+|["“”\s
 function norm(v){ return clean(v).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase(); }
 function dn(y,m,d){ return Math.round(Date.UTC(y,m-1,d)/DAY); }
 function parts(n){ var t=new Date(n*DAY); return {y:t.getUTCFullYear(),m:t.getUTCMonth()+1,d:t.getUTCDate(),wd:(t.getUTCDay()+6)%7}; }
-function isoWeek(n){ var p=parts(n), thu=n-p.wd+3, y=parts(thu).y; return Math.floor((thu-dn(y,1,1))/7)+1; }
 function fdate(e){ return (e.d<10?'0':'')+e.d+' '+MES3[e.m-1]+' '+e.y; }
 function pc(p){ return p==null?'—':Math.round(p)+' %'; }
 function st(p){ return p==null?'none':p>=META?'good':p>=WARN?'warn':'crit'; }
@@ -251,7 +250,6 @@ function derive(e){
   e.tot=mean(e.sc);
   e.placa=String(e.placa||'').toUpperCase().replace(/[\s_]+/g,'-');   /* "40 3643" y "40-3643" son la misma unidad */
   e.unit=e.placa?e.sub+' '+e.placa:e.sub;
-  e.wk=isoWeek(e.dn);
   return e;
 }
 /* Nota según el filtro de S: si se eligió una S, cuenta solo esa. */
@@ -531,10 +529,11 @@ function renderMonth(){
   var list=byM[m]||[], pm=months.filter(function(x){ return x<m; }).pop(), prev=pm?byM[pm]:null, prevLbl=pm?MESES[pm-1]:'';
   var seg='<div class="seg" role="group" aria-label="Mes">'+MESES.map(function(n,i){ return '<button type="button" data-month="'+(y*100+i+1)+'" aria-pressed="'+(i+1===m)+'"'+(byM[i+1]?'':' disabled')+'>'+MES3[i]+'</button>'; }).join('')+'</div>';
   var p=avg(list), note=filterNote();
-  /* Semanas del mes */
-  var first=dn(y,m,1), last=dn(m===12?y+1:y,m===12?1:m+1,1)-1, weeks=[];
-  for(var d=first-parts(first).wd; d<=last; d+=7){ var a=Math.max(d,first), b=Math.min(d+6,last); var l=list.filter(function(e){ return e.dn>=a&&e.dn<=b; });
-    weeks.push({lab:'S'+isoWeek(d), sub:parts(a).d+'–'+parts(b).d+' '+MES3[m-1], p:l.length?avg(l):null, tip:'Semana '+isoWeek(d)+'\n'+(l.length?pc(avg(l))+' · '+l.length+' evaluaciones':'Sin evaluaciones')}); }
+  /* Resultado del mes por área */
+  var byA=groupBy(list,function(e){ return e.area; }), prevA=prev?groupBy(prev,function(e){ return e.area; }):{};
+  var areas=Object.keys(byA).map(function(a){ var pa=avg(byA[a]), pv=prevA[a]?avg(prevA[a]):null;
+    return {lab:a, p:pa, n:byA[a].length, sub:pv==null?'':'Mes anterior: '+pc(pv), tip:a+'\n'+SS.map(function(s,i){ return s+': '+pc(avgS(byA[a],i)); }).join('\n')}; })
+    .sort(function(a,b){ return a.p-b.p; });
   /* Cobertura: subáreas evaluadas en el año que faltan este mes */
   var unitsYear=uniq(all.map(function(e){ return e.unit; })), unitsMonth=uniq(list.map(function(e){ return e.unit; }));
   var missing=unitsYear.filter(function(u){ return unitsMonth.indexOf(u)<0; });
@@ -543,7 +542,7 @@ function renderMonth(){
     +(prev?'<div>'+deltaTxt(p,avg(prev),prevLbl)+'</div>':'')
     +'<div class="facts"><span><b class="num">'+list.length+'</b> evaluaciones · <b class="num">'+unitsMonth.length+'</b> de '+unitsYear.length+' subáreas / unidades del año</span>'
     +'<span>Evaluadores: '+esc(uniq(list.map(function(e){ return e.ev; })).join(', '))+'</span>'+(note?'<span>'+esc(note)+'</span>':'')+'</div></div>'
-    +'<div class="card chart">'+colChart('Resultado por semana',weeks)+'</div></section>';
+    +'<div class="card"><h2>Resultado del mes por área</h2><p class="sub">De menor a mayor; la marca es la meta de '+META+' %</p>'+hbars(areas)+'</div></section>';
   h+=sCards(list,prev,prevLbl);
 
   /* Tabla por subárea con cada S */
@@ -588,7 +587,7 @@ function renderDetail(){
 function exportXls(list){
   if(typeof XLSX==='undefined'){ showMsg('No se cargó el lector de Excel. Revisa tu conexión y recarga la página.'); return; }
   var r2=function(p){ return p==null?'':Math.round(p*10)/10; };
-  var a=list.map(function(e){ var o={Fecha:e.y+'-'+pad(e.m)+'-'+pad(e.d),Hora:e.hm,Mes:MESES[e.m-1],Semana:e.wk,'Área':e.area,'Subárea':e.sub,Unidad:e.placa,Checklist:e.chk,Evaluador:e.ev};
+  var a=list.map(function(e){ var o={Fecha:e.y+'-'+pad(e.m)+'-'+pad(e.d),Hora:e.hm,Mes:MESES[e.m-1],'Área':e.area,'Subárea':e.sub,Unidad:e.placa,Checklist:e.chk,Evaluador:e.ev};
     SS.forEach(function(s,i){ o[s+' %']=r2(e.sc[i]); }); o['Total %']=r2(e.tot); return o; });
   var b=[]; list.forEach(function(e){ e.items.forEach(function(it){ b.push({Fecha:e.y+'-'+pad(e.m)+'-'+pad(e.d),'Área':e.area,'Subárea':e.sub,Unidad:e.placa,Evaluador:e.ev,S:SS[it[0]-1],Pregunta:it[1],'Puntuación':it[2],'Resultado %':r2(itemPct(e,it))}); }); });
   var wb=XLSX.utils.book_new();
