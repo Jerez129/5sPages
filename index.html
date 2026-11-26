@@ -155,6 +155,11 @@ td.tot{font-weight:600}
 .tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 input[type=search]{font:inherit;color:var(--ink);background:var(--surface);border:1px solid var(--axis);border-radius:4px;padding:6px 9px;width:240px}
 .empty{color:var(--muted);padding:14px 4px}
+.podium{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.pod{display:flex;flex-direction:column;gap:6px;border-top:4px solid var(--axis)}
+.pod.p1{border-top-color:#d4a514}.pod.p2{border-top-color:#9aa4ae}.pod.p3{border-top-color:#b06a35}
+.pod .pname{font-size:20px;font-weight:600}
+.pod .big{font-size:40px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums}
 .pend{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 #tip{position:fixed;z-index:20;pointer-events:none;background:var(--ink);color:var(--bg);padding:7px 10px;border-radius:5px;font-size:12.5px;line-height:1.4;white-space:pre-line;max-width:300px;box-shadow:0 4px 14px rgba(0,0,0,.25)}
 @media (max-width:980px){ .duo,.two{grid-template-columns:minmax(0,1fr)} .scards{grid-template-columns:repeat(2,minmax(0,1fr))} }
@@ -193,6 +198,7 @@ input[type=search]{font:inherit;color:var(--ink);background:var(--surface);borde
     <nav class="tabs" role="tablist" aria-label="Vista">
       <button type="button" role="tab" data-view="year">Resumen del año</button>
       <button type="button" role="tab" data-view="month">Mes</button>
+      <button type="button" role="tab" data-view="award">Gaps y premiación</button>
       <button type="button" role="tab" data-view="detail">Evaluaciones</button>
     </nav>
 
@@ -200,7 +206,7 @@ input[type=search]{font:inherit;color:var(--ink);background:var(--surface);borde
       <label>Año<select id="fYear"></select></label>
       <label>Área<select id="fArea"></select></label>
       <label>Subárea<select id="fSub"></select></label>
-      <label>Unidad<select id="fUnit"></select></label>
+      <label>Ficha<select id="fUnit"></select></label>
       <label>Checklist<select id="fChk"></select></label>
       <label>Evaluador<select id="fEv"></select></label>
       <label>S<select id="fS"></select></label>
@@ -210,6 +216,7 @@ input[type=search]{font:inherit;color:var(--ink);background:var(--surface);borde
 
     <div class="view" id="vYear"></div>
     <div class="view" id="vMonth" hidden></div>
+    <div class="view" id="vAward" hidden></div>
     <div class="view" id="vDetail" hidden></div>
   </main>
 </div>
@@ -261,7 +268,9 @@ function derive(e){
   e.sc=sum.map(function(v,i){ return cnt[i]?Math.min(100,v):null; });
   e.cnt=cnt;
   e.tot=mean(e.sc);
-  e.placa=String(e.placa||'').toUpperCase().replace(/[\s_]+/g,'-');   /* "40 3643" y "40-3643" son la misma unidad */
+  /* Ficha del camión: "40 3643", "40-3643", "403643" y "40:,3643" son la misma */
+  var pl=String(e.placa||'').toUpperCase().trim(), dg=pl.replace(/\D/g,'');
+  e.placa=dg.length===6?dg.slice(0,2)+'-'+dg.slice(2):pl.replace(/[\s_]+/g,'-');
   e.unit=e.placa?e.sub+' '+e.placa:e.sub;
   return e;
 }
@@ -598,6 +607,101 @@ function planMonthCard(y,m){
     +'<div class="card"><div class="sechead"><h2>Plan vs realizado en '+MESES[m-1]+'</h2>'+(falta.length?'<span class="sub">Primero lo que falta</span>':'')+'</div><div class="scroll" style="max-height:340px;overflow-y:auto;margin-top:6px"><table><thead><tr><th>Área</th><th>Subárea</th><th class="r">Plan</th><th class="r">Hechas</th><th>Estado</th></tr></thead><tbody>'+rows+'</tbody></table></div></div></section>';
 }
 
+/* ---------- Vista: gaps y premiación ---------- */
+/* Gap de una pregunta = 100 − su resultado promedio frente a su máximo (puntos que se pierden). */
+function questionGaps(list){
+  var q={};
+  list.forEach(function(e){ e.items.forEach(function(it){
+    if(S.f.s && String(it[0])!==S.f.s) return;
+    var k=e.chk+'|'+it[0]+'|'+it[1], o=q[k]||(q[k]={chk:e.chk,s:it[0],t:it[1],sum:0,n:0,low:0,units:{}});
+    var p=itemPct(e,it); o.sum+=p; o.n++; if(p<99.5){ o.low++; o.units[e.unit]=(o.units[e.unit]||0)+1; }
+  }); });
+  return Object.keys(q).map(function(k){ var o=q[k]; o.gap=100-o.sum/o.n; return o; }).filter(function(o){ return o.gap>0.05; })
+    .sort(function(a,b){ return b.gap-a.gap || b.low-a.low; });
+}
+/* Ranking para premiación: promedio 5S; desempata la constancia (meses evaluados), luego evaluaciones al 100 % y la nota más baja. */
+function awardRank(list, kind, min){
+  var g=groupBy(list.filter(function(e){ return kind==='ficha'?!!e.placa:!e.placa; }),function(e){ return kind==='ficha'?e.placa:e.area+'|'+e.sub; });
+  var rows=Object.keys(g).map(function(k){ var l=g[k], sc=l.map(score).filter(function(x){ return x!=null; });
+    return {k:k, lab:kind==='ficha'?k:k.split('|')[1], area:l[0].area, list:l, n:l.length, p:avg(l), months:uniq(l.map(function(e){ return String(e.m); })).length,
+      perfect:sc.filter(function(x){ return x>=99.95; }).length, min:sc.length?Math.min.apply(null,sc):null, last:l.reduce(function(a,e){ return !a||e.dn>a.dn?e:a; },null),
+      evs:uniq(l.map(function(e){ return e.ev; }))}; });
+  rows.forEach(function(r){ r.ok=r.n>=min; });
+  var core=function(a,b){ return (b.ok-a.ok) || (Math.round((b.p||0)*10)-Math.round((a.p||0)*10)) || (b.months-a.months) || (b.perfect-a.perfect) || (Math.round(b.min||0)-Math.round(a.min||0)); };
+  rows.sort(function(a,b){ return core(a,b) || a.lab.localeCompare(b.lab,'es'); });
+  rows.forEach(function(r,i){
+    if(!r.ok){ r.pos=null; return; }
+    var pr=rows[i-1];
+    if(pr&&pr.ok&&core(pr,r)===0){ r.pos=pr.pos; r.tie=pr.tie=true; } else r.pos=i+1;
+  });
+  return rows;
+}
+function renderAward(){
+  var y=+S.f.year, all=base(), byM=groupBy(all,function(e){ return e.m; });
+  if(!all.length){ $('vAward').innerHTML='<div class="card"><p class="empty">No hay evaluaciones en '+y+' con este filtro.</p></div>'; return; }
+  if(S.ap&&!byM[S.ap]) S.ap=0;
+  var per=S.ap||0, list=per?byM[per]:all, kind=S.akind||'ficha';
+  var min=S.amin!=null?S.amin:(per?1:6), perLbl=per?MESES[per-1]+' '+y:'todo '+y;
+  var seg='<div class="seg" role="group" aria-label="Periodo"><button type="button" data-ap="0" aria-pressed="'+(!per)+'">Todo el año</button>'
+    +MESES.map(function(n,i){ return '<button type="button" data-ap="'+(i+1)+'" aria-pressed="'+(per===i+1)+'"'+(byM[i+1]?'':' disabled')+'>'+MES3[i]+'</button>'; }).join('')+'</div>';
+  var h='<div class="sechead"><h2>Gaps y premiación · '+esc(perLbl)+'</h2>'+seg+'</div>';
+
+  /* Gap por S + mayor gap por pregunta */
+  var gaps=questionGaps(list), top=gaps.slice(0,15);
+  var sg=SN.map(function(n,i){ var p=avgS(list,i); return {lab:n, p:p==null?null:100-p, ok:p}; });
+  h+='<section class="view" style="gap:14px"><div class="card"><h2>Gap por S</h2><p class="sub">Puntos que faltan para el 100 %</p><div class="hbars">'
+    +sg.map(function(r){ var g=r.p==null?0:r.p, s=r.ok==null?'none':g<0.5?'good':st(r.ok);
+      return '<div class="hrow s-'+s+'"><div class="hl">'+esc(r.lab)+'</div><div class="ht"><i style="width:'+Math.min(100,g*4)+'%"></i></div><div class="hv">'+(r.p==null?'—':(g<0.05?'0':g.toFixed(1))+' pts')+'<small>Resultado '+pc(r.ok)+'</small></div></div>'; }).join('')
+    +'</div><p class="sub" style="font-size:12px;margin-top:8px">La barra está ampliada ×4 para que se vean las diferencias pequeñas.</p></div>'
+    +'<div class="card"><h2>Mayor gap por pregunta</h2><p class="sub">'+(gaps.length?gaps.length+' preguntas con puntos perdidos en '+esc(perLbl)+'. Gap = puntos que le faltan a la pregunta para su máximo, en promedio.':'Todas las preguntas están al 100 %.')+'</p>'
+    +(top.length?'<div class="scroll" style="margin-top:8px"><table class="qlist"><thead><tr><th class="c">#</th><th>Pregunta</th><th>S</th><th style="min-width:220px;width:24%">Gap</th><th class="r">Bajo 100 %</th></tr></thead><tbody>'
+      +top.map(function(o,i){ var d=S.preg[o.chk+'|'+o.t]||'', u=Object.keys(o.units).sort(function(a,b){ return o.units[b]-o.units[a]; });
+        return '<tr><td class="c num">'+(i+1)+'</td><td class="q">'+esc(o.t)+'<small>'+esc(o.chk)+(d?' · '+esc(d):'')+'</small>'+(u.length?'<small>Más veces en: '+esc(u.slice(0,4).map(function(x){ return x+(o.units[x]>1?' ('+o.units[x]+')':''); }).join(', '))+(u.length>4?' y '+(u.length-4)+' más':'')+'</small>':'')+'</td><td>'+SS[o.s-1]+'</td>'
+          +'<td><div class="hrow s-'+(o.gap>=40?'crit':o.gap>=20?'warn':'good')+'" style="grid-template-columns:minmax(0,1fr) 66px;padding:0"><div class="ht"><i style="width:'+Math.min(100,o.gap)+'%"></i></div><div class="hv">'+o.gap.toFixed(1)+' pts</div></div></td>'
+          +'<td class="r">'+o.low+' de '+o.n+'</td></tr>'; }).join('')+'</tbody></table></div>':'')
+    +'</div></section>';
+
+  /* Premiación */
+  var rows=awardRank(list,kind,min), elig=rows.filter(function(r){ return r.ok; }), podium=elig.filter(function(r){ return r.pos<=3; }).slice(0,6);
+  var nm=kind==='ficha'?'Ficha':'Subárea', closed=per?1:Object.keys(byM).length;
+  h+='<div class="sechead" style="margin-top:6px"><div><h2>Premiación: '+(kind==='ficha'?'fichas (camiones)':'subáreas')+' con mejor adherencia 5S</h2>'
+    +'<p class="sub">Gana el mejor promedio 5S de '+esc(perLbl)+'. Si empatan, gana quien fue evaluado en más meses, luego quien tiene más evaluaciones al 100 % y luego la nota más baja más alta.</p></div>'
+    +'<div class="ctrls"><div class="seg" role="group" aria-label="Qué premiar"><button type="button" data-akind="ficha" aria-pressed="'+(kind==='ficha')+'">Fichas</button><button type="button" data-akind="sub" aria-pressed="'+(kind==='sub')+'">Subáreas</button></div>'
+    +'<label class="sub" style="display:inline-flex;gap:6px;align-items:center">Mínimo de evaluaciones <select id="aMin">'+[1,2,3,4,6,8,9,10].map(function(v){ return '<option'+(v===min?' selected':'')+'>'+v+'</option>'; }).join('')+'</select></label>'
+    +'<button type="button" id="aXls">Descargar ranking</button></div></div>';
+  if(!elig.length){ h+='<div class="card"><p class="empty">Ninguna '+nm.toLowerCase()+' tiene al menos '+min+' evaluaciones en '+esc(perLbl)+'. Baja el mínimo.</p></div>'; }
+  else {
+    var medal=['1.er lugar','2.º lugar','3.er lugar'];
+    h+='<section class="podium">'+podium.map(function(r){
+      return '<div class="card pod p'+r.pos+'"><span class="lbl">'+medal[r.pos-1]+(r.tie?' · empate':'')+'</span><span class="pname">'+(kind==='ficha'?'Ficha ':'')+esc(r.lab)+'</span><span class="sub">'+esc(r.area)+'</span>'
+        +'<span class="big">'+(r.p==null?'—':r.p.toFixed(1)+' %')+'</span>'
+        +'<div class="facts"><span><b class="num">'+r.n+'</b> evaluaciones en <b>'+r.months+'</b> de '+closed+' '+(closed===1?'mes':'meses')+'</span><span><b class="num">'+r.perfect+'</b> al 100 % · más baja '+pc(r.min)+'</span><span>Última: '+fdate(r.last)+'</span></div></div>'; }).join('')+'</section>';
+  }
+  h+='<section class="card"><div class="scroll"><table><thead><tr><th class="c">Lugar</th><th>'+nm+'</th>'+(kind==='sub'?'<th>Área</th>':'')+'<th class="c">Promedio</th>'+SS.map(function(s){ return '<th class="c">'+s+'</th>'; }).join('')+'<th class="r">Evaluaciones</th><th class="r">Meses</th><th class="r">Al 100 %</th><th class="c">Más baja</th><th>Última</th></tr></thead><tbody>'
+    +rows.map(function(r){ return '<tr'+(r.ok?'':' style="color:var(--muted)"')+'><td class="c num">'+(r.ok?r.pos+(r.tie?'=':''):'<span class="tag" title="Menos de '+min+' evaluaciones">No participa</span>')+'</td><td><b>'+esc(r.lab)+'</b></td>'+(kind==='sub'?'<td>'+esc(r.area)+'</td>':'')
+      +'<td class="wk s-'+st(r.p)+'"><span>'+(r.p==null?'—':r.p.toFixed(1))+'</span></td>'+SN.map(function(_,i){ return cell(avgS(r.list,i)); }).join('')
+      +'<td class="r">'+r.n+'</td><td class="r">'+r.months+'</td><td class="r">'+r.perfect+'</td>'+cell(r.min)+'<td class="num" style="white-space:nowrap">'+fdate(r.last)+'</td></tr>'; }).join('')
+    +'</tbody></table></div><p class="sub" style="font-size:12px;margin-top:8px">"=" indica empate en todos los criterios. Las que tienen menos de '+min+' evaluaciones aparecen en gris y no participan.</p></section>';
+  $('vAward').innerHTML=h;
+  $('aMin').onchange=function(){ S.amin=+this.value; renderAward(); };
+  $('aXls').onclick=function(){
+    if(typeof XLSX==='undefined'){ showMsg('No se cargó el lector de Excel. Revisa tu conexión y recarga la página.'); return; }
+    var r1=function(p){ return p==null?'':Math.round(p*10)/10; };
+    var a=rows.map(function(r){ var o={Lugar:r.ok?r.pos:'No participa'}; o[nm]=r.lab; o['Área']=r.area; o['Promedio %']=r1(r.p); SS.forEach(function(s,i){ o[s+' %']=r1(avgS(r.list,i)); });
+      o.Evaluaciones=r.n; o.Meses=r.months; o['Al 100 %']=r.perfect; o['Más baja %']=r1(r.min); o['Última']=fdate(r.last); o.Evaluadores=r.evs.join(', '); return o; });
+    var b=gaps.map(function(o,i){ return {'#':i+1,Checklist:o.chk,S:SS[o.s-1],Pregunta:o.t,'Descripción':S.preg[o.chk+'|'+o.t]||'','Gap (pts)':r1(o.gap),'Bajo 100 %':o.low,Evaluaciones:o.n,'Dónde':Object.keys(o.units).join(', ')}; });
+    var wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(a),'Premiación');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(b),'Gap por pregunta');
+    XLSX.writeFile(wb,'Premiación 5S '+(kind==='ficha'?'fichas':'subáreas')+' '+perLbl+'.xlsx');
+  };
+}
+document.addEventListener('click',function(ev){
+  var b=ev.target.closest('[data-ap],[data-akind]'); if(!b||b.disabled) return;
+  if(b.dataset.ap!=null){ S.ap=+b.dataset.ap; S.amin=null; } else S.akind=b.dataset.akind;
+  renderAward();
+});
+
 /* ---------- Editor del plan ---------- */
 var PD=null;   /* borrador mientras el editor está abierto */
 function openPlan(show){
@@ -718,8 +822,8 @@ function render(){
   var last=S.evals[S.evals.length-1];
   $('subtitle').textContent=S.evals.length+' evaluaciones guardadas · última del '+fdate(last)+(last.agency?' · '+last.agency:'');
   Array.prototype.forEach.call(document.querySelectorAll('.tabs button'),function(b){ b.setAttribute('aria-selected',String(b.dataset.view===S.view)); });
-  $('vYear').hidden=S.view!=='year'; $('vMonth').hidden=S.view!=='month'; $('vDetail').hidden=S.view!=='detail';
-  if(S.view==='year') renderYear(); else if(S.view==='month') renderMonth(); else renderDetail();
+  $('vYear').hidden=S.view!=='year'; $('vMonth').hidden=S.view!=='month'; $('vDetail').hidden=S.view!=='detail'; $('vAward').hidden=S.view!=='award';
+  if(S.view==='year') renderYear(); else if(S.view==='month') renderMonth(); else if(S.view==='award') renderAward(); else renderDetail();
   saveLocal();
 }
 
