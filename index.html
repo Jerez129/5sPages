@@ -505,7 +505,7 @@ function qTable(rows, showUnits){
   if(!rows.length) return '<p class="empty">Todas las preguntas están al 100 % con este filtro.</p>';
   return '<div class="scroll"><table class="qlist"><thead><tr><th>Pregunta</th><th>S</th><th class="r">Resultado<small>vs su máximo</small></th><th class="r">Bajo 100 %<small>evaluaciones</small></th></tr></thead><tbody>'
     +rows.map(function(o){ var d=S.preg[o.chk+'|'+o.t]||''; var u=Object.keys(o.units);
-      return '<tr><td class="q">'+esc(o.t)+'<small>'+esc(o.chk)+(d?' · '+esc(d):'')+(showUnits&&u.length?'<br>En: '+esc(u.join(', ')):'')+'</small></td><td>'+SS[o.s-1]+'</td>'+cell(o.p)+'<td class="r">'+o.low+' de '+o.n+'</td></tr>'; }).join('')+'</tbody></table></div>';
+      return '<tr><td class="q">'+esc(d||o.t)+'<small>'+esc(o.t)+' · '+esc(o.chk)+(showUnits&&u.length?'<br>En: '+esc(u.join(', ')):'')+'</small></td><td>'+SS[o.s-1]+'</td>'+cell(o.p)+'<td class="r">'+o.low+' de '+o.n+'</td></tr>'; }).join('')+'</tbody></table></div>';
 }
 function sCards(list, prev, prevLbl){
   return '<section class="scards">'+SN.map(function(n,i){
@@ -656,7 +656,7 @@ function renderAward(){
     +'<div class="card"><h2>Mayor gap por pregunta</h2><p class="sub">'+(gaps.length?gaps.length+' preguntas con puntos perdidos en '+esc(perLbl)+'. Gap = puntos que le faltan a la pregunta para su máximo, en promedio.':'Todas las preguntas están al 100 %.')+'</p>'
     +(top.length?'<div class="scroll" style="margin-top:8px"><table class="qlist"><thead><tr><th class="c">#</th><th>Pregunta</th><th>S</th><th style="min-width:220px;width:24%">Gap</th><th class="r">Bajo 100 %</th></tr></thead><tbody>'
       +top.map(function(o,i){ var d=S.preg[o.chk+'|'+o.t]||'', u=Object.keys(o.units).sort(function(a,b){ return o.units[b]-o.units[a]; });
-        return '<tr><td class="c num">'+(i+1)+'</td><td class="q">'+esc(o.t)+'<small>'+esc(o.chk)+(d?' · '+esc(d):'')+'</small>'+(u.length?'<small>Más veces en: '+esc(u.slice(0,4).map(function(x){ return x+(o.units[x]>1?' ('+o.units[x]+')':''); }).join(', '))+(u.length>4?' y '+(u.length-4)+' más':'')+'</small>':'')+'</td><td>'+SS[o.s-1]+'</td>'
+        return '<tr><td class="c num">'+(i+1)+'</td><td class="q">'+esc(d||o.t)+'<small>'+esc(o.t)+' · '+esc(o.chk)+'</small>'+(u.length?'<small>Más veces en: '+esc(u.slice(0,4).map(function(x){ return x+(o.units[x]>1?' ('+o.units[x]+')':''); }).join(', '))+(u.length>4?' y '+(u.length-4)+' más':'')+'</small>':'')+'</td><td>'+SS[o.s-1]+'</td>'
           +'<td><div class="hrow s-'+(o.gap>=40?'crit':o.gap>=20?'warn':'good')+'" style="grid-template-columns:minmax(0,1fr) 66px;padding:0"><div class="ht"><i style="width:'+Math.min(100,o.gap)+'%"></i></div><div class="hv">'+o.gap.toFixed(1)+' pts</div></div></td>'
           +'<td class="r">'+o.low+' de '+o.n+'</td></tr>'; }).join('')+'</tbody></table></div>':'')
     +'</div></section>';
@@ -689,7 +689,7 @@ function renderAward(){
     var r1=function(p){ return p==null?'':Math.round(p*10)/10; };
     var a=rows.map(function(r){ var o={Lugar:r.ok?r.pos:'No participa'}; o[nm]=r.lab; o['Área']=r.area; o['Promedio %']=r1(r.p); SS.forEach(function(s,i){ o[s+' %']=r1(avgS(r.list,i)); });
       o.Evaluaciones=r.n; o.Meses=r.months; o['Al 100 %']=r.perfect; o['Más baja %']=r1(r.min); o['Última']=fdate(r.last); o.Evaluadores=r.evs.join(', '); return o; });
-    var b=gaps.map(function(o,i){ return {'#':i+1,Checklist:o.chk,S:SS[o.s-1],Pregunta:o.t,'Descripción':S.preg[o.chk+'|'+o.t]||'','Gap (pts)':r1(o.gap),'Bajo 100 %':o.low,Evaluaciones:o.n,'Dónde':Object.keys(o.units).join(', ')}; });
+    var b=gaps.map(function(o,i){ return {'#':i+1,Checklist:o.chk,S:SS[o.s-1],Pregunta:S.preg[o.chk+'|'+o.t]||o.t,'Código':o.t,'Gap (pts)':r1(o.gap),'Bajo 100 %':o.low,Evaluaciones:o.n,'Dónde':Object.keys(o.units).join(', ')}; });
     var wb=XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(a),'Premiación');
     XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(b),'Gap por pregunta');
